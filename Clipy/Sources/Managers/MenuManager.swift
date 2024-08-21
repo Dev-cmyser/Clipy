@@ -179,6 +179,15 @@ private extension MenuManager {
         historyMenu = NSMenu(title: Constants.Menu.history)
         snippetMenu = NSMenu(title: Constants.Menu.snippet)
 
+                let searchItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+                let searchField = NSSearchField(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+                searchField.placeholderString = "Search..."
+                searchField.target = self
+                searchField.action = #selector(searchFieldDidChange(_:))
+                searchItem.view = searchField
+                historyMenu?.addItem(searchItem)
+
+
         addHistoryItems(clipMenu!)
         addHistoryItems(historyMenu!)
 
@@ -197,6 +206,71 @@ private extension MenuManager {
         clipMenu?.addItem(NSMenuItem(title: L10n.quitClipy, action: #selector(AppDelegate.terminate)))
 
         statusItem?.menu = clipMenu
+    }
+    @objc func searchFieldDidChange(_ sender: NSSearchField) {
+            let searchText = sender.stringValue
+            filterHistoryItems(with: searchText)
+        }
+
+    func filterHistoryItems(with searchText: String) {
+            historyMenu?.removeAllItems()
+
+            // Добавляем обратно поле поиска
+            let searchItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            let searchField = NSSearchField(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+            searchField.placeholderString = "Search..."
+            searchField.target = self
+            searchField.action = #selector(searchFieldDidChange(_:))
+            searchItem.view = searchField
+            historyMenu?.addItem(searchItem)
+
+            // Добавляем обратно отфильтрованные элементы
+            let placeInLine = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.numberOfItemsPlaceInline)
+            let placeInsideFolder = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.numberOfItemsPlaceInsideFolder)
+            let maxHistory = AppEnvironment.current.defaults.integer(forKey: Constants.UserDefaults.maxHistorySize)
+
+            let firstIndex = firstIndexOfMenuItems()
+            var listNumber = firstIndex
+            var subMenuCount = placeInLine
+            var subMenuIndex = 1 + placeInLine
+
+            let ascending = !AppEnvironment.current.defaults.bool(forKey: Constants.UserDefaults.reorderClipsAfterPasting)
+            let clipResults = realm.objects(CPYClip.self)
+                .filter("title CONTAINS[c] %@", searchText)
+                .sorted(byKeyPath: #keyPath(CPYClip.updateTime), ascending: ascending)
+
+            let currentSize = Int(clipResults.count)
+            var i = 0
+            for clip in clipResults {
+                if placeInLine < 1 || placeInLine - 1 < i {
+                    // Folder
+                    if i == subMenuCount {
+                        let subMenuItem = makeSubmenuItem(subMenuCount, start: firstIndex, end: currentSize, numberOfItems: placeInsideFolder)
+                        historyMenu?.addItem(subMenuItem)
+                        listNumber = firstIndex
+                    }
+
+                    // Clip
+                    if let subMenu = historyMenu?.item(at: subMenuIndex)?.submenu {
+                        let menuItem = makeClipMenuItem(clip, index: i, listNumber: listNumber)
+                        subMenu.addItem(menuItem)
+                        listNumber = incrementListNumber(listNumber, max: placeInsideFolder, start: firstIndex)
+                    }
+                } else {
+                    // Clip
+                    let menuItem = makeClipMenuItem(clip, index: i, listNumber: listNumber)
+                    historyMenu?.addItem(menuItem)
+                    listNumber = incrementListNumber(listNumber, max: placeInLine, start: firstIndex)
+                }
+
+                i += 1
+                if i == subMenuCount + placeInsideFolder {
+                    subMenuCount += placeInsideFolder
+                    subMenuIndex += 1
+                }
+
+                if maxHistory <= i { break }
+            }
     }
 
     func menuItemTitle(_ title: String, listNumber: NSInteger, isMarkWithNumber: Bool) -> String {
